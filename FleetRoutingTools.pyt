@@ -142,6 +142,10 @@ class GenerateRouteGeometryforWasteCollection:
         parameter. This method is called after internal validation."""
         param_nalayer = parameters[0]
         param_use_parcels = parameters[1]
+        # Version check
+        arcgis_version = arcpy.GetInstallInfo()["Version"]
+        if arcgis_version < "3.5":
+            param_nalayer.setErrorMessage("This tool requires ArcGIS Pro 3.5 or higher.")
         # validate the input layer
         if param_nalayer.altered and param_nalayer.valueAsText:
             waste_layer = param_nalayer.value
@@ -168,8 +172,15 @@ class GenerateRouteGeometryforWasteCollection:
                         param_nalayer.setErrorMessage(
                             "Please remove all joins from the Routes sublayer before running this tool."
                         )
-                except Exception:  # pylint: disable=broad-except
-                    param_nalayer.setErrorMessage("The input layer is not a valid network analysis Layer.")
+                except Exception as ex:  # pylint: disable=broad-except
+                    if arcgis_version < "3.6" and "naclass_name" in str(ex):
+                        # This is a workaround for 3.5, when GetNASublayer didn't work if a
+                        # sublayer had a join on it.  This problem was fixed in 3.6.
+                        param_nalayer.setErrorMessage(
+                            "Please remove all joins from the sublayers before running this tool."
+                        )
+                    else:
+                        param_nalayer.setErrorMessage("The input layer is not a valid network analysis Layer.")
         # Make parcel parameters conditionally required.
         # Error 735 causes the little red require star to show up on the parameters
         if param_use_parcels.value is True:
