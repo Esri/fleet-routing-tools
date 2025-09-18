@@ -142,15 +142,19 @@ class GenerateRouteGeometryforWasteCollection:
         parameter. This method is called after internal validation."""
         param_nalayer = parameters[0]
         param_use_parcels = parameters[1]
+
         # Version check
         arcgis_version = arcpy.GetInstallInfo()["Version"]
         if arcgis_version < "3.5":
             param_nalayer.setErrorMessage("This tool requires ArcGIS Pro 3.5 or higher.")
-        # validate the input layer
+
+        # Validate the input layer
         if param_nalayer.altered and param_nalayer.valueAsText:
             waste_layer = param_nalayer.value
             if isinstance(waste_layer, str) and waste_layer.endswith(".lyrx"):
                 waste_layer = arcpy.mp.LayerFile(waste_layer).listLayers()[0]
+
+            # Make sure it's a Waste Collection layer
             try:
                 desc = arcpy.Describe(waste_layer)
                 solvername = desc.solverName
@@ -160,7 +164,9 @@ class GenerateRouteGeometryforWasteCollection:
                     )
             except Exception:  # pylint: disable=broad-except
                 param_nalayer.setErrorMessage("The input layer is not a valid network analysis Layer.")
-            else:
+
+            # Make sure relevant sublayers don't have joins
+            if not param_nalayer.hasError():
                 try:
                     stops_sublayer = arcpy.na.GetNASublayer(waste_layer, "Stops")
                     if "connection_info" not in stops_sublayer.connectionProperties.keys():
@@ -181,6 +187,7 @@ class GenerateRouteGeometryforWasteCollection:
                         )
                     else:
                         param_nalayer.setErrorMessage("The input layer is not a valid network analysis Layer.")
+
         # Make parcel parameters conditionally required.
         # Error 735 causes the little red require star to show up on the parameters
         if param_use_parcels.value is True:
@@ -190,7 +197,6 @@ class GenerateRouteGeometryforWasteCollection:
                 parameters[3].setIDMessage("Error", 735, parameters[3].displayName)
             if not parameters[4].valueAsText:
                 parameters[4].setIDMessage("Error", 735, parameters[4].displayName)
-
         else:
             parameters[2].clearMessage()
             parameters[3].clearMessage()
