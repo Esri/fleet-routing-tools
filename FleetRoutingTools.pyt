@@ -312,8 +312,8 @@ class RouteGeometryGenerator:
             connection_path = [j for j in junk_parts if j.startswith(junk_prefix)]
             if connection_path:
                 data_source = os.path.normpath(connection_path[0].split("=")[1])
-                if data_source.startswith("\\"):
-                    # For some reason UNC paths are not given starting with a double slash \\.
+                if data_source.startswith("\\") and not data_source.startswith("\\\\"):
+                    # For some reason UNC paths are not given starting with a double slash \\ sometimes.
                     data_source = "\\" + data_source
                 # At this point, the data source is the path to the geodatabase, and we need to add the feature dataset
                 # and network dataset to the path
