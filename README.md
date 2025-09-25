@@ -31,12 +31,14 @@ The tool provides two different methods for generating route polygons:
 
 ### Generate polygons using the data within the Waste Collection layer's sublayers
 
-The tool can generate polygons using only data included within the Waste Collection layer's sublayers.  The tool generates route polygons by identifying the network dataset edges the stops were located on and the routes the stops wre assigned to and runs a series of geoprocessing tools to buffer those lines and handle overlaps.  This option does not require any additional data beyond what's already included in the solved Waste Collection layer.
+The tool can generate polygons using only data included within the Waste Collection layer's sublayers.  The tool generates route polygons by identifying the network dataset edges the stops were located on and the routes the stops were assigned to and runs a series of geoprocessing tools to buffer those lines and handle overlaps.  This option does not require any additional data beyond what's already included in the solved Waste Collection layer.
 
 The following image shows an example of output derived from using the data within the Waste Collection layer's sublayers.  The data used in this example is fictitious and presented only as an illustration of the tool's capabilities.
 ![Screenshot of tool output when using the data within the Waste Collection layer's sublayers](./images/Screenshot_Polygons_Stops.png)
 
 Warning: This method typically takes some time to run, potentially a few hours depending on the size of the problem.
+
+Note: Because the polygons are generated based on the network locations of the stops and not their original geographic locations, it is possible that the geometry of the stops may fall outside the polygons generated for the routes to which they are assigned.  [Learn more about the network locations of analysis inputs.](https://pro.arcgis.com/en/pro-app/latest/help/analysis/networks/locating-analysis-inputs.htm)
 
 ### Generate polygons using parcels
 
