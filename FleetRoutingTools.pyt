@@ -16,6 +16,7 @@ Copyright 2025 Esri
 
 import os
 import traceback
+import uuid
 import pandas as pd
 import arcpy
 
@@ -86,13 +87,21 @@ class GenerateRouteGeometryforWasteCollection:
         )
         param_stops_id.filter.type = "ValueList"
         param_stops_id.filter.list = []
+        param_out_nalayer = arcpy.Parameter(
+            name="out_wc_layer",
+            displayName="Output Waste Collection Layer",
+            datatype="GPNALayer",
+            direction="Output",
+            parameterType="Derived"
+        )
 
         return [
             param_nalayer,
             param_use_parcels,
             param_parcel_data,
             param_parcel_id,
-            param_stops_id
+            param_stops_id,
+            param_out_nalayer
         ]
 
     def isLicensed(self):
@@ -110,7 +119,18 @@ class GenerateRouteGeometryforWasteCollection:
             param_parcel_data,
             param_parcel_id,
             param_stops_id,
+            param_out_nalayer
         ] = parameters
+
+        # If the input NA layer parameter is derived, that means it's coming from a Model Builder bubble. In this case,
+        # set the derived output parameter's value equal to the input WC layer parameter's value. This fixes Model
+        # Builder workflows where otherwise the output bubble would not be seen as a valid WC layer when connected to
+        # other tools. This works even when the input WC layer does not yet have a value.  Ultimately it just
+        # serves to inform the derived output of what data type it is.
+        if param_nalayer.isInputValueDerived():
+            param_out_nalayer.value = param_nalayer.value
+
+        # Configure parcel-related parameters based on checkbox value
         if param_use_parcels.value:
             param_parcel_data.enabled = True
             param_parcel_id.enabled = True
@@ -218,6 +238,7 @@ class GenerateRouteGeometryforWasteCollection:
                 param_parcel_data,
                 param_parcel_id,
                 param_stops_id,
+                _
             ] = parameters
             waste_layer = param_nalayer.value
             # Set the progressor so the user is informed of progress
@@ -232,6 +253,8 @@ class GenerateRouteGeometryforWasteCollection:
             else:
                 geom_generator = RouteGeometryGeneratorFromStops(waste_layer)
                 geom_generator.create_route_geometry()
+            # Set derived output to the updated WC layer
+            arcpy.SetParameter(5, waste_layer)
         except RouteGeometryToolError:
             # Handle errors we've explicitly caught for known reasons
             # No need to do anything here since raising the error already added tool error messages
@@ -499,8 +522,9 @@ class RouteGeometryGeneratorFromStops(RouteGeometryGenerator):
         self._write_progress_msg("Associating blocks with the routes that serve them...")
         # Make a dummy Waste Collection layer in a temporary gdb workspace
         travel_mode = self.waste_layer.getDefinition("V3").solver["appliedTravelModeJSON"]
-        with arcpy.EnvManager(workspace=arcpy.env.scratchGDB):
-            dummy_lyr = arcpy.na.MakeWasteCollectionAnalysisLayer(self.network, travel_mode=travel_mode).getOutput(0)
+        with arcpy.EnvManager(workspace=arcpy.env.scratchGDB):  # pylint: disable=no-member
+            dummy_lyr = arcpy.na.MakeWasteCollectionAnalysisLayer(
+                self.network, f"WC_{uuid.uuid4().hex}", travel_mode=travel_mode).getOutput(0)
         # Add the real Waste Collection layer's stops to the dummy layer using network location fields and a snap offset
         stops_sublayer_name = arcpy.na.GetNAClassNames(dummy_lyr)["Stops"]
         field_mappings = arcpy.na.NAClassFieldMappings(
