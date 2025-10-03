@@ -45,6 +45,7 @@ class GenerateRouteGeometryforWasteCollection:
         self.description = ""
         self.scratch_gdb = SCRATCH_GDB
         self.temp_outputs = []
+        self.arcgis_version = arcpy.GetInstallInfo()["Version"]
 
     def getParameterInfo(self):
         """Define the tool parameters."""
@@ -157,6 +158,60 @@ class GenerateRouteGeometryforWasteCollection:
             param_stops_id.filter.list = []
         return
 
+    def _validate_waste_layer(self, param_nalayer):
+        """Validate the input Waste Collection layer."""
+        waste_layer = param_nalayer.value
+
+        # Convert lyrx files to layer objects
+        if isinstance(waste_layer, str) and waste_layer.endswith(".lyrx"):
+            try:
+                waste_layer = arcpy.mp.LayerFile(waste_layer).listLayers()[0]
+            except Exception:  # pylint: disable=broad-except
+                param_nalayer.setErrorMessage("The input layer file is invalid.")
+                return
+
+        # Make sure it's a Waste Collection layer
+        try:
+            desc = arcpy.Describe(waste_layer)
+            solvername = desc.solverName
+            if solvername != "Waste Collection Solver":
+                param_nalayer.setErrorMessage(
+                    "The input layer is not a Waste Collection layer."
+                )
+        except Exception:  # pylint: disable=broad-except
+            param_nalayer.setErrorMessage("The input layer is not a valid network analysis Layer.")
+            return
+
+        # Make sure relevant sublayers don't have joins
+        try:
+            stops_sublayer = arcpy.na.GetNASublayer(waste_layer, "Stops")
+            if "connection_info" not in stops_sublayer.connectionProperties.keys():
+                param_nalayer.setErrorMessage(
+                    "Please remove all joins from the Stops sublayer before running this tool."
+                )
+                return
+            routes_sublayer = arcpy.na.GetNASublayer(waste_layer, "Routes")
+            if "connection_info" not in routes_sublayer.connectionProperties.keys():
+                param_nalayer.setErrorMessage(
+                    "Please remove all joins from the Routes sublayer before running this tool."
+                )
+                return
+        except Exception as ex:  # pylint: disable=broad-except
+            if self.arcgis_version < "3.6" and "naclass_name" in str(ex):
+                # This is a workaround for 3.5, when GetNASublayer didn't work if a
+                # sublayer had a join on it.  This problem was fixed in 3.6.
+                param_nalayer.setErrorMessage(
+                    "Please remove all joins from the sublayers before running this tool."
+                )
+            else:
+                param_nalayer.setErrorMessage("The input layer is not a valid network analysis Layer.")
+            return
+
+        # Make sure the layer isn't in an edit session because we'll encounter errors later
+        if arcpy.IsBeingEdited(stops_sublayer.dataSource):
+            param_nalayer.setErrorMessage("Sublayer data is being edited. Save edits before running this tool.")
+            return
+
     def updateMessages(self, parameters):
         """Modify the messages created by internal validation for each tool
         parameter. This method is called after internal validation."""
@@ -164,49 +219,12 @@ class GenerateRouteGeometryforWasteCollection:
         param_use_parcels = parameters[1]
 
         # Version check
-        arcgis_version = arcpy.GetInstallInfo()["Version"]
-        if arcgis_version < "3.5":
+        if self.arcgis_version < "3.5":
             param_nalayer.setErrorMessage("This tool requires ArcGIS Pro 3.5 or higher.")
 
         # Validate the input layer
         if param_nalayer.altered and param_nalayer.valueAsText:
-            waste_layer = param_nalayer.value
-            if isinstance(waste_layer, str) and waste_layer.endswith(".lyrx"):
-                waste_layer = arcpy.mp.LayerFile(waste_layer).listLayers()[0]
-
-            # Make sure it's a Waste Collection layer
-            try:
-                desc = arcpy.Describe(waste_layer)
-                solvername = desc.solverName
-                if solvername != "Waste Collection Solver":
-                    param_nalayer.setErrorMessage(
-                        "The input layer is not a Waste Collection layer."
-                    )
-            except Exception:  # pylint: disable=broad-except
-                param_nalayer.setErrorMessage("The input layer is not a valid network analysis Layer.")
-
-            # Make sure relevant sublayers don't have joins
-            if not param_nalayer.hasError():
-                try:
-                    stops_sublayer = arcpy.na.GetNASublayer(waste_layer, "Stops")
-                    if "connection_info" not in stops_sublayer.connectionProperties.keys():
-                        param_nalayer.setErrorMessage(
-                            "Please remove all joins from the Stops sublayer before running this tool."
-                        )
-                    routes_sublayer = arcpy.na.GetNASublayer(waste_layer, "Routes")
-                    if "connection_info" not in routes_sublayer.connectionProperties.keys():
-                        param_nalayer.setErrorMessage(
-                            "Please remove all joins from the Routes sublayer before running this tool."
-                        )
-                except Exception as ex:  # pylint: disable=broad-except
-                    if arcgis_version < "3.6" and "naclass_name" in str(ex):
-                        # This is a workaround for 3.5, when GetNASublayer didn't work if a
-                        # sublayer had a join on it.  This problem was fixed in 3.6.
-                        param_nalayer.setErrorMessage(
-                            "Please remove all joins from the sublayers before running this tool."
-                        )
-                    else:
-                        param_nalayer.setErrorMessage("The input layer is not a valid network analysis Layer.")
+            self._validate_waste_layer(param_nalayer)
 
         # Make parcel parameters conditionally required.
         # Error 735 causes the little red require star to show up on the parameters
@@ -281,9 +299,9 @@ class RouteGeometryGenerator:
         self.waste_layer = waste_layer
         self.desc_waste_layer = arcpy.Describe(waste_layer)
         self.network = self._get_na_layer_network_dataset_path()
-        self.stops_sublayer = arcpy.na.GetNASublayer(waste_layer, "Stops")
-        self.routes_sublayer = arcpy.na.GetNASublayer(waste_layer, "Routes")
-        self.route_lines_sublayer = arcpy.na.GetNASublayer(waste_layer, "RouteLines")
+        self.stops_sublayer = arcpy.na.GetNASublayer(waste_layer, "Stops").dataSource
+        self.routes_sublayer = arcpy.na.GetNASublayer(waste_layer, "Routes").dataSource
+        self.route_lines_sublayer = arcpy.na.GetNASublayer(waste_layer, "RouteLines").dataSource
         # Do some basic checks to make sure the layer can be used
         if int(arcpy.management.GetCount(self.route_lines_sublayer).getOutput(0)) == 0:
             raise RouteGeometryToolError((
@@ -415,6 +433,8 @@ class RouteGeometryGeneratorFromStops(RouteGeometryGenerator):
         fields = ["RouteName", "SourceID", "SourceOID", "SideOfEdge"]
         with arcpy.da.SearchCursor(self.stops_sublayer, fields, "SourceOID <> -1") as cur:  # pylint: disable=no-member
             df = pd.DataFrame(cur, columns=fields)
+        if df.empty:
+            raise RouteGeometryToolError("All stops are unlocated.")
         df.drop_duplicates(inplace=True)
         located_source_ids = list(df['SourceID'].unique())
 
